@@ -86,7 +86,7 @@ async def http_error_handler(request: Request, error: HTTPException):
         detail = error.detail.get("message", "Request failed.")
     else:
         code = f"http_{error.status_code}"
-        detail = str(error.detail)
+        detail = error.detail
     body = ErrorResponse(detail=detail, code=code).model_dump()
     return JSONResponse(status_code=error.status_code, content=body, headers=error.headers)
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { Menu, HardHat } from 'lucide-react';
 
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -16,6 +17,7 @@ import { checkHealth } from './api';
 
 export default function App() {
   const [aiOnline, setAiOnline] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     checkHealth()
@@ -26,7 +28,44 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="app-shell">
-        <Sidebar aiOnline={aiOnline} />
+        {/* Mobile Header */}
+        <header className="mobile-header">
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open navigation menu"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-xs">
+            <div className="sidebar-logo-icon" style={{ width: 28, height: 28 }}>
+              <HardHat size={16} color="white" />
+            </div>
+            <span style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-text-primary)' }}>ConstructAI</span>
+          </div>
+          <div className="flex items-center gap-xs">
+            <div className={`status-dot ${aiOnline ? '' : 'offline'}`} title={aiOnline ? 'AI Online' : 'AI Offline'} />
+            <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{aiOnline ? 'AI Online' : 'Offline'}</span>
+          </div>
+        </header>
+
+        {/* Backdrop for mobile */}
+        {sidebarOpen && (
+          <div
+            className="sidebar-backdrop"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Sidebar */}
+        <Sidebar
+          aiOnline={aiOnline}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+
+        {/* Main Content Area */}
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -41,15 +80,17 @@ export default function App() {
           </Routes>
         </main>
       </div>
+
       <Toaster
         position="top-right"
         toastOptions={{
           style: {
-            background: '#0f1e3c',
+            background: '#0a1628',
             color: '#f0f6ff',
-            border: '1px solid rgba(59,130,246,0.3)',
+            border: '1px solid rgba(249, 115, 22, 0.3)',
             borderRadius: '10px',
             fontSize: '0.875rem',
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)',
           },
           success: { iconTheme: { primary: '#10b981', secondary: '#fff' } },
           error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },

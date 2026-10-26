@@ -2,174 +2,230 @@
 Pydantic schemas for AI response validation with fallback defaults.
 All financial values are in Indian Rupees (INR/₹).
 """
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ResponseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class ErrorResponse(ResponseModel):
+    detail: str
+    code: str
+
+
+class HealthResponse(ResponseModel):
+    status: Literal["healthy"]
+    service: str
+    ai_available: bool
+    version: str
 
 
 # ─────────────────────────── Shared ────────────────────────────
 
-class RiskItem(BaseModel):
-    severity: str = Field(default="low", description="low | medium | high | critical")
-    description: str = Field(default="No risk identified")
-    mitigation: str = Field(default="Monitor situation")
+class RiskItem(ResponseModel):
+    severity: Literal["low", "medium", "high", "critical"]
+    description: str
+    mitigation: str
 
 
-class CostItem(BaseModel):
-    label: str = Field(default="Item")
-    amount_inr: float = Field(default=0.0, description="Amount in Indian Rupees")
-    unit: str = Field(default="LS")
-    quantity: float = Field(default=1.0)
+class StructuralFinding(ResponseModel):
+    finding: str
+    location: str
+    risk_level: Literal["low", "medium", "high", "critical"]
+    recommended_action: str
+    confidence_score: int = Field(ge=0, le=100)
+    uncertainty_notes: list[str]
+
+
+class CostItem(ResponseModel):
+    label: str = Field(min_length=1, max_length=100)
+    unit: str = Field(min_length=1, max_length=40)
+    quantity: float = Field(gt=0, le=1_000_000_000)
+    unit_rate_inr: float = Field(ge=0)
+    amount_inr: float = Field(default=0, ge=0, description="Server-calculated amount in Indian Rupees")
+
+    @model_validator(mode="after")
+    def calculate_amount(self):
+        self.amount_inr = round(self.quantity * self.unit_rate_inr, 2)
+        return self
 
 
 # ─────────────────── Site Analysis (Image) ──────────────────────
 
-class SiteAnalysisResponse(BaseModel):
-    summary: str = Field(default="Site analysis complete.")
-    site_condition: str = Field(default="Unknown")
-    detected_elements: List[str] = Field(default_factory=lambda: ["Site boundary"])
-    safety_concerns: List[str] = Field(default_factory=list)
-    recommended_actions: List[str] = Field(default_factory=lambda: ["Review site conditions"])
-    risk_level: str = Field(default="medium")
-    estimated_site_area_sqft: Optional[float] = Field(default=None)
-    infrastructure_readiness_score: int = Field(default=50, ge=0, le=100)
-    risks: List[RiskItem] = Field(default_factory=list)
+class SiteAnalysisResponse(ResponseModel):
+    summary: str
+    site_condition: str
+    detected_elements: list[str]
+    safety_concerns: list[str]
+    recommended_actions: list[str]
+    risk_level: Literal["low", "medium", "high", "critical"]
+    estimated_site_area_sqft: float | None
+    infrastructure_readiness_score: int = Field(ge=0, le=100)
+    confidence_score: int = Field(ge=0, le=100)
+    uncertainty_notes: list[str]
+    professional_review_required: Literal[True] = True
+    professional_review_warning: Literal[
+        "AI-assisted visual screening only; a qualified construction professional must verify findings on site."
+    ] = "AI-assisted visual screening only; a qualified construction professional must verify findings on site."
+    structural_findings: list[StructuralFinding]
+    risks: list[RiskItem]
 
 
 # ─────────────────── Cost Estimation ─────────────────────────────
 
-class CostEstimationResponse(BaseModel):
-    project_name: str = Field(default="Construction Project")
-    project_type: str = Field(default="Residential")
-    total_estimated_cost_inr: float = Field(default=5000000.0)
-    cost_breakdown: List[CostItem] = Field(default_factory=lambda: [
-        CostItem(label="Civil Work", amount_inr=2000000.0, unit="LS", quantity=1),
-        CostItem(label="Finishing", amount_inr=1500000.0, unit="LS", quantity=1),
-        CostItem(label="MEP Services", amount_inr=1000000.0, unit="LS", quantity=1),
-        CostItem(label="Contingency", amount_inr=500000.0, unit="LS", quantity=1),
-    ])
-    cost_per_sqft_inr: float = Field(default=2500.0)
-    timeline_months: int = Field(default=12)
-    risks: List[RiskItem] = Field(default_factory=list)
-    recommendations: List[str] = Field(default_factory=lambda: ["Hire qualified contractors"])
-    confidence_score: int = Field(default=70, ge=0, le=100)
+class CostEstimationResponse(ResponseModel):
+    project_name: str
+    project_type: str
+    total_estimated_cost_inr: float = Field(default=0, ge=0)
+    cost_breakdown: list[CostItem] = Field(min_length=1, max_length=1000)
+    cost_per_sqft_inr: float = Field(default=0, ge=0)
+    timeline_months: int = Field(ge=1)
+    risks: list[RiskItem]
+    recommendations: list[str]
+    assumptions: list[str] = Field(min_length=1, max_length=50)
+    estimate_source: Literal["AI-generated indicative estimate; no live rate feed"] = "AI-generated indicative estimate; no live rate feed"
+    confidence_score: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def calculate_total(self):
+        self.total_estimated_cost_inr = round(sum(item.amount_inr for item in self.cost_breakdown), 2)
+        return self
 
 
 # ─────────────────── Safety Inspection ──────────────────────────
 
-class SafetyViolation(BaseModel):
-    violation_type: str = Field(default="General Safety")
-    location_in_image: str = Field(default="Site area")
-    severity: str = Field(default="medium")
-    corrective_action: str = Field(default="Address immediately")
-    regulatory_reference: str = Field(default="IS: 4130")
+class SafetyViolation(ResponseModel):
+    violation_type: str
+    location_in_image: str
+    severity: Literal["low", "medium", "high", "critical"]
+    corrective_action: str
+    regulatory_reference: str
 
 
-class SafetyInspectionResponse(BaseModel):
-    overall_safety_score: int = Field(default=70, ge=0, le=100)
-    compliance_status: str = Field(default="Partially Compliant")
-    violations: List[SafetyViolation] = Field(default_factory=list)
-    ppe_compliance: Dict[str, bool] = Field(default_factory=lambda: {
-        "helmet": False,
-        "safety_vest": False,
-        "gloves": False,
-        "safety_boots": False,
-    })
-    immediate_actions_required: List[str] = Field(default_factory=list)
-    recommendations: List[str] = Field(default_factory=lambda: ["Conduct safety briefing"])
-    estimated_penalty_inr: float = Field(default=0.0)
-    next_inspection_date: str = Field(default="Within 7 days")
+class PPECompliance(ResponseModel):
+    helmet: bool
+    safety_vest: bool
+    gloves: bool
+    safety_boots: bool
+
+
+class SafetyInspectionResponse(ResponseModel):
+    overall_safety_score: int = Field(ge=0, le=100)
+    compliance_status: str
+    violations: list[SafetyViolation]
+    ppe_compliance: PPECompliance
+    immediate_actions_required: list[str]
+    recommendations: list[str]
+    estimated_penalty_inr: float = Field(ge=0)
+    next_inspection_date: str
+    risk_level: Literal["low", "medium", "high", "critical"]
+    confidence_score: int = Field(ge=0, le=100)
+    uncertainty_notes: list[str]
+    professional_review_required: Literal[True] = True
+    professional_review_warning: Literal[
+        "AI-assisted screening is not a compliance certification; a qualified safety professional must verify findings on site."
+    ] = "AI-assisted screening is not a compliance certification; a qualified safety professional must verify findings on site."
 
 
 # ─────────────────── Progress Monitoring ─────────────────────────
 
-class PhaseProgress(BaseModel):
-    phase_name: str = Field(default="Foundation")
-    planned_percent: float = Field(default=100.0)
-    actual_percent: float = Field(default=0.0)
-    status: str = Field(default="pending")
-    delay_days: int = Field(default=0)
+class PhaseProgress(ResponseModel):
+    phase_name: str
+    planned_percent: float = Field(ge=0, le=100)
+    actual_percent: float = Field(ge=0, le=100)
+    status: Literal["pending", "in_progress", "delayed", "completed"]
+    delay_days: int = Field(ge=0)
 
 
-class ProgressMonitoringResponse(BaseModel):
-    overall_progress_percent: float = Field(default=0.0)
-    schedule_variance_days: int = Field(default=0)
-    phases: List[PhaseProgress] = Field(default_factory=lambda: [
-        PhaseProgress(phase_name="Site Preparation", planned_percent=100, actual_percent=100, status="completed"),
-        PhaseProgress(phase_name="Foundation", planned_percent=100, actual_percent=80, status="in_progress"),
-        PhaseProgress(phase_name="Structure", planned_percent=50, actual_percent=30, status="in_progress"),
-        PhaseProgress(phase_name="MEP", planned_percent=0, actual_percent=0, status="pending"),
-        PhaseProgress(phase_name="Finishing", planned_percent=0, actual_percent=0, status="pending"),
-    ])
-    resource_utilization_percent: float = Field(default=75.0)
-    budget_utilized_inr: float = Field(default=0.0)
-    budget_remaining_inr: float = Field(default=0.0)
-    key_observations: List[str] = Field(default_factory=lambda: ["Review site conditions"])
-    recommendations: List[str] = Field(default_factory=lambda: ["Maintain current pace"])
-    projected_completion_date: str = Field(default="To be determined")
+class ProgressMonitoringResponse(ResponseModel):
+    overall_progress_percent: float = Field(ge=0, le=100)
+    schedule_variance_days: int
+    phases: list[PhaseProgress]
+    resource_utilization_percent: float = Field(ge=0, le=100)
+    budget_utilized_inr: float = Field(ge=0)
+    budget_remaining_inr: float
+    key_observations: list[str]
+    recommendations: list[str]
+    projected_completion_date: str
 
 
 # ─────────────────── Material Analysis ──────────────────────────
 
-class MaterialItem(BaseModel):
-    name: str = Field(default="Cement")
-    quantity_required: float = Field(default=100.0)
-    unit: str = Field(default="bags")
-    unit_cost_inr: float = Field(default=400.0)
-    total_cost_inr: float = Field(default=40000.0)
-    supplier_recommendation: str = Field(default="Local supplier")
-    quality_grade: str = Field(default="Standard")
+class MaterialItem(ResponseModel):
+    name: str = Field(min_length=1, max_length=100)
+    quantity_required: float = Field(gt=0, le=1_000_000_000)
+    unit: str = Field(min_length=1, max_length=40)
+    unit_cost_inr: float = Field(ge=0)
+    total_cost_inr: float = Field(default=0, ge=0)
+    supplier_recommendation: str
+    quality_grade: str
+
+    @model_validator(mode="after")
+    def calculate_total(self):
+        self.total_cost_inr = round(self.quantity_required * self.unit_cost_inr, 2)
+        return self
 
 
-class MaterialAnalysisResponse(BaseModel):
-    project_description: str = Field(default="Construction project")
-    total_material_cost_inr: float = Field(default=1000000.0)
-    materials: List[MaterialItem] = Field(default_factory=list)
-    wastage_factor_percent: float = Field(default=10.0)
-    procurement_timeline_days: int = Field(default=30)
-    recommendations: List[str] = Field(default_factory=lambda: ["Source materials locally"])
-    cost_optimization_tips: List[str] = Field(default_factory=lambda: ["Bulk purchase for discounts"])
+class MaterialAnalysisResponse(ResponseModel):
+    project_description: str
+    total_material_cost_inr: float = Field(default=0, ge=0)
+    materials: list[MaterialItem] = Field(min_length=1, max_length=1000)
+    wastage_factor_percent: float = Field(ge=0, le=100)
+    procurement_timeline_days: int = Field(ge=0)
+    recommendations: list[str]
+    cost_optimization_tips: list[str]
+    assumptions: list[str] = Field(min_length=1, max_length=50)
+    estimate_source: Literal["AI-generated indicative estimate; no live rate feed"] = "AI-generated indicative estimate; no live rate feed"
+
+    @model_validator(mode="after")
+    def calculate_total(self):
+        self.total_material_cost_inr = round(sum(item.total_cost_inr for item in self.materials), 2)
+        return self
 
 
 # ─────────────────── Project Report ─────────────────────────────
 
-class MilestoneItem(BaseModel):
-    name: str = Field(default="Project Start")
-    planned_date: str = Field(default="TBD")
-    actual_date: Optional[str] = Field(default=None)
-    status: str = Field(default="pending")
+class MilestoneItem(ResponseModel):
+    name: str
+    planned_date: str
+    actual_date: str | None
+    status: Literal["pending", "in_progress", "delayed", "completed"]
 
 
-class ProjectReportResponse(BaseModel):
-    project_name: str = Field(default="Construction Project")
-    report_date: str = Field(default="Today")
-    executive_summary: str = Field(default="Project is progressing as planned.")
-    overall_health: str = Field(default="On Track")
-    kpis: Dict[str, Any] = Field(default_factory=lambda: {
-        "budget_utilization": "75%",
-        "schedule_adherence": "85%",
-        "quality_score": "80%",
-        "safety_score": "90%",
-    })
-    milestones: List[MilestoneItem] = Field(default_factory=list)
-    financial_summary: Dict[str, float] = Field(default_factory=lambda: {
-        "total_budget_inr": 10000000.0,
-        "spent_inr": 7500000.0,
-        "remaining_inr": 2500000.0,
-        "projected_overrun_inr": 0.0,
-    })
-    risks: List[RiskItem] = Field(default_factory=list)
-    action_items: List[str] = Field(default_factory=lambda: ["Review project timeline"])
-    next_steps: List[str] = Field(default_factory=lambda: ["Schedule team meeting"])
+class ProjectKPIs(ResponseModel):
+    budget_utilization: str | float
+    schedule_adherence: str | float
+    quality_score: str | float
+    safety_score: str | float
+
+
+class FinancialSummary(ResponseModel):
+    total_budget_inr: float = Field(ge=0)
+    spent_inr: float = Field(ge=0)
+    remaining_inr: float
+    projected_overrun_inr: float = Field(ge=0)
+
+
+class ProjectReportResponse(ResponseModel):
+    project_name: str
+    report_date: str
+    executive_summary: str
+    overall_health: Literal["On Track", "Delayed", "At Risk", "Completed"]
+    kpis: ProjectKPIs
+    milestones: list[MilestoneItem]
+    financial_summary: FinancialSummary
+    risks: list[RiskItem]
+    action_items: list[str]
+    next_steps: list[str]
 
 
 # ─────────────────── Chat / General Query ───────────────────────
 
-class ChatResponse(BaseModel):
-    answer: str = Field(default="I apologize, I was unable to process your query. Please try again.")
-    follow_up_suggestions: List[str] = Field(default_factory=lambda: [
-        "Tell me about site safety requirements",
-        "What is the cost estimate for my project?",
-        "Analyze my site condition"
-    ])
-    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    data_points: List[str] = Field(default_factory=list)
+class ChatResponse(ResponseModel):
+    answer: str
+    follow_up_suggestions: list[str]
+    confidence: float = Field(ge=0.0, le=1.0)
+    data_points: list[str]

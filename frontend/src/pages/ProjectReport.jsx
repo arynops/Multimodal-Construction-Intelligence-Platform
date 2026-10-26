@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { FileText, Download, Activity, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { FileText, Download, Activity, CheckCircle, Clock, AlertTriangle, RotateCcw } from 'lucide-react';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { RiskCard, RecommendationList } from '../components/ResultCards';
+import { RiskCard, RecommendationList, ErrorStateCard, EmptyAssessmentNotice, SampleDataBadge, LoadingStateBox } from '../components/ResultCards';
 import { generateReport, formatINR, formatINRCompact } from '../api';
 import toast from 'react-hot-toast';
 
@@ -28,11 +28,14 @@ export default function ProjectReport() {
     achievements: 'Structure completed ahead of schedule, zero LTI incidents',
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleGenerate = async () => {
+    setResult(null);
+    setError(null);
     setLoading(true);
     try {
       const res = await generateReport({
@@ -42,14 +45,33 @@ export default function ProjectReport() {
         current_progress_percent: Number(form.current_progress_percent),
         team_size: Number(form.team_size),
       });
-      setResult(res.data);
-      toast.success('Report generated!');
+      const data = res.data;
+      const hasAssessmentData = data && (
+        (data.executive_summary && data.executive_summary.trim().length > 0) ||
+        (data.financial_summary && data.financial_summary.total_budget_inr > 0) ||
+        (Array.isArray(data.milestones) && data.milestones.length > 0)
+      );
+
+      setResult(data);
+      if (hasAssessmentData) {
+        toast.success('Report generated!');
+      } else {
+        toast('Report returned no detailed executive metrics', { icon: '⚠️' });
+      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Report generation failed.');
+      const detail = err.response?.data?.detail || err.message || 'Report generation failed.';
+      setError(detail);
+      toast.error(detail);
     } finally {
       setLoading(false);
     }
   };
+
+  const hasAssessmentData = result && (
+    (result.executive_summary && result.executive_summary.trim().length > 0) ||
+    (result.financial_summary && result.financial_summary.total_budget_inr > 0) ||
+    (Array.isArray(result.milestones) && result.milestones.length > 0)
+  );
 
   const radarData = result?.kpis ? Object.entries(result.kpis).map(([key, val]) => ({
     subject: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -61,7 +83,7 @@ export default function ProjectReport() {
     <div>
       <div className="page-header">
         <div className="flex items-center gap-sm mb-sm">
-          <FileText size={24} style={{ color: '#06b6d4' }} />
+          <FileText size={24} style={{ color: 'var(--color-accent-orange)' }} />
           <h1 className="page-title" style={{ marginBottom: 0 }}>Project Report</h1>
         </div>
         <p className="page-subtitle">AI-generated executive project status report with KPIs, financial summary, and risk register.</p>
@@ -69,93 +91,207 @@ export default function ProjectReport() {
 
       <div className="grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Report Parameters</h3>
-          <div className="form-group">
-            <label className="form-label">Project Name</label>
-            <input className="form-control" value={form.project_name} onChange={e => set('project_name', e.target.value)} id="report-proj-name" />
+          <div className="flex items-center justify-between mb-sm" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Report Parameters</h3>
+            <SampleDataBadge label="Sample Project Data" />
           </div>
-          <div className="grid-2">
+
+          <div className="form-group">
+            <label htmlFor="report-proj-name" className="form-label">Project Name</label>
+            <input
+              id="report-proj-name"
+              className="form-control"
+              value={form.project_name}
+              onChange={e => set('project_name', e.target.value)}
+            />
+          </div>
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
             <div className="form-group">
-              <label className="form-label">Project Type</label>
-              <select className="form-control" value={form.project_type} onChange={e => set('project_type', e.target.value)} id="report-proj-type">
+              <label htmlFor="report-proj-type" className="form-label">Project Type</label>
+              <select
+                id="report-proj-type"
+                className="form-control"
+                value={form.project_type}
+                onChange={e => set('project_type', e.target.value)}
+              >
                 {['Residential', 'Commercial', 'Industrial', 'Infrastructure', 'Mixed-Use'].map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Location</label>
-              <input className="form-control" value={form.location} onChange={e => set('location', e.target.value)} />
+              <label htmlFor="report-location" className="form-label">Location</label>
+              <input
+                id="report-location"
+                className="form-control"
+                value={form.location}
+                onChange={e => set('location', e.target.value)}
+              />
             </div>
           </div>
-          <div className="grid-2">
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
             <div className="form-group">
-              <label className="form-label">Start Date</label>
-              <input className="form-control" type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)} />
+              <label htmlFor="report-start-date" className="form-label">Start Date</label>
+              <input
+                id="report-start-date"
+                className="form-control"
+                type="date"
+                value={form.start_date}
+                onChange={e => set('start_date', e.target.value)}
+              />
             </div>
             <div className="form-group">
-              <label className="form-label">Planned End Date</label>
-              <input className="form-control" type="date" value={form.planned_end_date} onChange={e => set('planned_end_date', e.target.value)} />
-            </div>
-          </div>
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label">Total Budget (₹)</label>
-              <input className="form-control" type="number" value={form.total_budget_inr} onChange={e => set('total_budget_inr', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Spent Till Date (₹)</label>
-              <input className="form-control" type="number" value={form.spent_inr} onChange={e => set('spent_inr', e.target.value)} />
-            </div>
-          </div>
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label">Progress (%)</label>
-              <input className="form-control" type="number" min={0} max={100} value={form.current_progress_percent} onChange={e => set('current_progress_percent', e.target.value)} id="report-progress-input" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Team Size</label>
-              <input className="form-control" type="number" value={form.team_size} onChange={e => set('team_size', e.target.value)} />
+              <label htmlFor="report-end-date" className="form-label">Planned End Date</label>
+              <input
+                id="report-end-date"
+                className="form-control"
+                type="date"
+                value={form.planned_end_date}
+                onChange={e => set('planned_end_date', e.target.value)}
+              />
             </div>
           </div>
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
+            <div className="form-group">
+              <label htmlFor="report-budget" className="form-label">Total Budget (₹ INR)</label>
+              <input
+                id="report-budget"
+                className="form-control"
+                type="number"
+                value={form.total_budget_inr}
+                onChange={e => set('total_budget_inr', e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="report-spent" className="form-label">Spent Till Date (₹ INR)</label>
+              <input
+                id="report-spent"
+                className="form-control"
+                type="number"
+                value={form.spent_inr}
+                onChange={e => set('spent_inr', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
+            <div className="form-group">
+              <label htmlFor="report-progress-input" className="form-label">Progress (%)</label>
+              <input
+                id="report-progress-input"
+                className="form-control"
+                type="number"
+                min={0}
+                max={100}
+                value={form.current_progress_percent}
+                onChange={e => set('current_progress_percent', e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="report-team-size" className="form-label">Team Size</label>
+              <input
+                id="report-team-size"
+                className="form-control"
+                type="number"
+                value={form.team_size}
+                onChange={e => set('team_size', e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="form-group">
-            <label className="form-label">Current Phase</label>
-            <select className="form-control" value={form.current_phase} onChange={e => set('current_phase', e.target.value)} id="report-phase-select">
+            <label htmlFor="report-phase-select" className="form-label">Current Phase</label>
+            <select
+              id="report-phase-select"
+              className="form-control"
+              value={form.current_phase}
+              onChange={e => set('current_phase', e.target.value)}
+            >
               {['Site Preparation', 'Foundation', 'Structure', 'MEP', 'Finishing', 'External Works'].map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Key Issues</label>
-            <textarea className="form-control" rows={2} value={form.key_issues} onChange={e => set('key_issues', e.target.value)} />
+            <label htmlFor="report-key-issues" className="form-label">Key Issues</label>
+            <textarea
+              id="report-key-issues"
+              className="form-control"
+              rows={2}
+              value={form.key_issues}
+              onChange={e => set('key_issues', e.target.value)}
+            />
           </div>
+
           <div className="form-group">
-            <label className="form-label">Achievements</label>
-            <textarea className="form-control" rows={2} value={form.achievements} onChange={e => set('achievements', e.target.value)} />
+            <label htmlFor="report-achievements" className="form-label">Achievements</label>
+            <textarea
+              id="report-achievements"
+              className="form-control"
+              rows={2}
+              value={form.achievements}
+              onChange={e => set('achievements', e.target.value)}
+            />
           </div>
-          <button className="btn btn-primary w-full" onClick={handleGenerate} disabled={loading} id="generate-report-btn">
-            {loading ? <><div className="spinner spinner-sm" /> Generating<span className="loading-dots" /></> : <><FileText size={16} /> Generate Report</>}
+
+          <button
+            className="btn btn-primary w-full"
+            onClick={handleGenerate}
+            disabled={loading}
+            id="generate-report-btn"
+          >
+            {loading ? (
+              <>
+                <div className="spinner spinner-sm" />
+                <span>Generating Executive Report</span>
+                <span className="loading-dots" />
+              </>
+            ) : (
+              <>
+                <FileText size={16} />
+                <span>Generate Report</span>
+              </>
+            )}
           </button>
         </div>
 
         <div>
           {loading && (
-            <div className="card loading-overlay">
-              <div className="spinner" />
-              <p className="loading-text">AI generating executive report<span className="loading-dots" /></p>
-            </div>
+            <LoadingStateBox
+              title="AI generating executive report"
+              subtitle="Synthesizing financial metrics, milestones, and risk register"
+            />
           )}
 
-          {result && !loading && (
+          {error && !loading && (
+            <ErrorStateCard
+              title="Report Generation Failed"
+              message={error}
+              onRetry={handleGenerate}
+            />
+          )}
+
+          {result && !loading && !hasAssessmentData && (
+            <EmptyAssessmentNotice
+              title="Report Inconclusive — Empty Data"
+              message="Empty data is not presented as a successful assessment. No executive milestones or financial summary data were generated. Please check your project parameters and retry."
+              onRetry={handleGenerate}
+            />
+          )}
+
+          {result && !loading && hasAssessmentData && (
             <div className="result-panel">
               {/* Header */}
               <div className="card mb-md" style={{
-                background: 'linear-gradient(135deg, rgba(6,182,212,0.15) 0%, rgba(59,130,246,0.1) 100%)',
-                borderColor: 'rgba(6,182,212,0.3)',
+                background: 'linear-gradient(135deg, rgba(15,27,51,0.95) 0%, rgba(249,115,22,0.12) 100%)',
+                borderColor: 'rgba(249,115,22,0.3)',
               }}>
-                <div className="flex items-center justify-between mb-sm">
-                  <h3 style={{ fontSize: '1.125rem', fontWeight: 700 }}>{result.project_name}</h3>
+                <div className="flex items-center justify-between mb-sm" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{result.project_name}</h3>
                   <span className="badge" style={{
-                    background: `${(statusColors[result.overall_health] || '#3b82f6')}20`,
-                    color: statusColors[result.overall_health] || '#93c5fd',
-                    border: `1px solid ${(statusColors[result.overall_health] || '#3b82f6')}40`,
+                    background: `${(statusColors[result.overall_health] || '#f97316')}22`,
+                    color: statusColors[result.overall_health] || '#fb923c',
+                    border: `1px solid ${(statusColors[result.overall_health] || '#f97316')}40`,
                     fontSize: '0.8rem', padding: '4px 12px',
                   }}>
                     {result.overall_health}
@@ -177,8 +313,8 @@ export default function ProjectReport() {
                     <RadarChart data={radarData}>
                       <PolarGrid stroke="rgba(255,255,255,0.1)" />
                       <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                      <Radar name="KPIs" dataKey="A" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.2} />
-                      <Tooltip contentStyle={{ background: '#0f1e3c', border: '1px solid rgba(6,182,212,0.3)', borderRadius: 8 }} />
+                      <Radar name="KPIs" dataKey="A" stroke="#f97316" fill="#f97316" fillOpacity={0.25} />
+                      <Tooltip contentStyle={{ background: '#0a1628', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 8, color: '#f0f6ff' }} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
@@ -187,20 +323,20 @@ export default function ProjectReport() {
               {/* Financial Summary */}
               {result.financial_summary && (
                 <div className="card mb-md">
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12 }}>Financial Summary</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12 }}>Financial Summary (₹ INR)</h4>
                   <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
                     {[
                       { key: 'total_budget_inr', label: 'Total Budget', color: 'blue' },
-                      { key: 'spent_inr', label: 'Spent', color: 'amber' },
-                      { key: 'remaining_inr', label: 'Remaining', color: 'green' },
+                      { key: 'spent_inr', label: 'Spent Till Date', color: 'amber' },
+                      { key: 'remaining_inr', label: 'Remaining Budget', color: 'green' },
                       { key: 'projected_overrun_inr', label: 'Proj. Overrun', color: 'red' },
                     ].map(({ key, label, color }) => (
                       <div key={key} className={`stat-card ${color}`} style={{ padding: '14px' }}>
                         <div className="stat-label">{label}</div>
-                        <div className="stat-value" style={{ fontSize: '1.125rem' }}>
+                        <div className="stat-value" style={{ fontSize: '1.25rem' }}>
                           {formatINRCompact(result.financial_summary[key] || 0)}
                         </div>
-                        <div className="stat-sub">{formatINR(result.financial_summary[key] || 0)}</div>
+                        <div className="stat-sub inr">{formatINR(result.financial_summary[key] || 0)}</div>
                       </div>
                     ))}
                   </div>
@@ -246,11 +382,13 @@ export default function ProjectReport() {
             </div>
           )}
 
-          {!result && !loading && (
+          {!result && !loading && !error && (
             <div className="card empty-state">
               <FileText size={52} className="empty-state-icon" />
-              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>No report yet</p>
-              <p style={{ fontSize: '0.875rem' }}>Fill in project details to generate an executive report</p>
+              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: 'var(--color-text-primary)' }}>No report yet</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+                Fill in project details to generate an executive status report
+              </p>
             </div>
           )}
         </div>

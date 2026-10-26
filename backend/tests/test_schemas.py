@@ -1,72 +1,119 @@
-"""
-Tests for Pydantic schema fallback defaults.
-These tests never call the network — they validate schema safety guarantees.
-"""
+"""Tests for strict Pydantic response models used by AI endpoints."""
 import pytest
+from pydantic import ValidationError
+
 from schemas import (
-    SiteAnalysisResponse,
-    CostEstimationResponse,
-    SafetyInspectionResponse,
-    ProgressMonitoringResponse,
-    MaterialAnalysisResponse,
-    ProjectReportResponse,
     ChatResponse,
+    CostEstimationResponse,
+    CostItem,
+    MaterialAnalysisResponse,
+    MaterialItem,
+    SafetyInspectionResponse,
+    SiteAnalysisResponse,
+    StructuralFinding,
 )
 
 
-class TestSchemaDefaults:
-    """All schemas must instantiate with zero arguments (pure defaults)."""
+class TestResponseSchemas:
+    def test_chat_response_requires_complete_provider_payload(self):
+        with pytest.raises(ValidationError):
+            ChatResponse.model_validate({})
 
-    def test_site_analysis_defaults(self):
-        obj = SiteAnalysisResponse()
-        assert isinstance(obj.summary, str) and obj.summary
-        assert isinstance(obj.detected_elements, list)
-        assert 0 <= obj.infrastructure_readiness_score <= 100
+        response = ChatResponse.model_validate({
+            "answer": "Use a qualified engineer.",
+            "follow_up_suggestions": [],
+            "confidence": 0.7,
+            "data_points": [],
+        })
+        assert response.answer == "Use a qualified engineer."
 
-    def test_cost_estimation_defaults(self):
-        obj = CostEstimationResponse()
-        assert obj.total_estimated_cost_inr >= 0
-        assert isinstance(obj.cost_breakdown, list)
-        assert obj.confidence_score >= 0
+    def test_unknown_response_fields_are_rejected(self):
+        with pytest.raises(ValidationError):
+            ChatResponse.model_validate({
+                "answer": "Answer",
+                "follow_up_suggestions": [],
+                "confidence": 0.7,
+                "data_points": [],
+                "made_up": True,
+            })
 
-    def test_safety_inspection_defaults(self):
-        obj = SafetyInspectionResponse()
-        assert 0 <= obj.overall_safety_score <= 100
-        assert isinstance(obj.ppe_compliance, dict)
+    def test_cost_item_rejects_negative_amounts(self):
+        with pytest.raises(ValidationError):
+            CostItem(label="Concrete", unit="m3", quantity=1, unit_rate_inr=-1)
 
-    def test_progress_monitoring_defaults(self):
-        obj = ProgressMonitoringResponse()
-        assert 0.0 <= obj.overall_progress_percent <= 100.0
-        assert isinstance(obj.phases, list)
+    def test_cost_item_amount_is_calculated_from_quantity_and_rate(self):
+        item = CostItem.model_validate({
+            "label": "Concrete",
+            "unit": "m3",
+            "quantity": 2,
+            "unit_rate_inr": 1500,
+            "amount_inr": 1,
+        })
+        assert item.amount_inr == 3000
 
-    def test_material_analysis_defaults(self):
-        obj = MaterialAnalysisResponse()
-        assert obj.total_material_cost_inr >= 0
+    def test_material_total_is_calculated_from_line_items(self):
+        item = MaterialItem(
+            name="Cement",
+            quantity_required=3,
+            unit="bags",
+            unit_cost_inr=400,
+            supplier_recommendation="Local supplier category",
+            quality_grade="Standard",
+        )
+        response = MaterialAnalysisResponse(
+            project_description="Sample estimate",
+            materials=[item],
+            wastage_factor_percent=5,
+            procurement_timeline_days=14,
+            recommendations=[],
+            cost_optimization_tips=[],
+            assumptions=["Indicative rate"],
+        )
+        assert item.total_cost_inr == 1200
+        assert response.total_material_cost_inr == 1200
 
-    def test_project_report_defaults(self):
-        obj = ProjectReportResponse()
-        assert isinstance(obj.kpis, dict)
-        assert isinstance(obj.financial_summary, dict)
+    def test_site_score_range_is_enforced(self):
+        with pytest.raises(ValidationError):
+            SiteAnalysisResponse.model_validate({
+                "summary": "Summary",
+                "site_condition": "Active",
+                "detected_elements": [],
+                "safety_concerns": [],
+                "recommended_actions": [],
+                "risk_level": "low",
+                "estimated_site_area_sqft": None,
+                "infrastructure_readiness_score": 101,
+                "confidence_score": 50,
+                "uncertainty_notes": [],
+                "structural_findings": [],
+                "risks": [],
+            })
 
-    def test_chat_response_defaults(self):
-        obj = ChatResponse()
-        assert obj.answer
-        assert 0.0 <= obj.confidence <= 1.0
-        assert isinstance(obj.follow_up_suggestions, list)
+    def test_structural_finding_requires_reviewable_details(self):
+        finding = StructuralFinding(
+            finding="Visible crack-like line",
+            location="Column C2",
+            risk_level="high",
+            recommended_action="Restrict nearby access and request an engineer inspection",
+            confidence_score=45,
+            uncertainty_notes=["Depth and cause cannot be determined from the image"],
+        )
+        assert finding.risk_level == "high"
+        assert finding.uncertainty_notes
 
-
-class TestSchemaValidation:
-    """Out-of-range values should be coerced/clamped by validators."""
-
-    def test_score_clamped_at_max(self):
-        obj = SiteAnalysisResponse(infrastructure_readiness_score=100)
-        assert obj.infrastructure_readiness_score == 100
-
-    def test_confidence_range_enforced(self):
-        # Values above 1.0 should raise a validation error
-        with pytest.raises(Exception):
-            ChatResponse(confidence=1.5)
-
-    def test_inr_amounts_non_negative(self):
-        obj = CostEstimationResponse(total_estimated_cost_inr=0)
-        assert obj.total_estimated_cost_inr == 0
+    def test_safety_response_requires_professional_review(self):
+        response = SafetyInspectionResponse.model_validate({
+            "overall_safety_score": 50,
+            "compliance_status": "Review required",
+            "violations": [],
+            "ppe_compliance": {"helmet": True, "safety_vest": False, "gloves": True, "safety_boots": True},
+            "immediate_actions_required": [],
+            "recommendations": [],
+            "estimated_penalty_inr": 0,
+            "next_inspection_date": "Before work resumes",
+            "risk_level": "medium",
+            "confidence_score": 50,
+            "uncertainty_notes": ["Some workers are obscured"],
+        })
+        assert response.professional_review_required is True
+        assert "qualified safety professional" in response.professional_review_warning

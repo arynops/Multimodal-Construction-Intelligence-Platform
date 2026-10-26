@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
-import { DollarSign, TrendingUp, Clock, AlertTriangle } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { RiskCard, RecommendationList } from '../components/ResultCards';
-import { estimateCost, formatINR, formatINRCompact } from '../api';
+import { IndianRupee, TrendingUp, Clock, AlertTriangle, Sparkles, RotateCcw } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { RiskCard, RecommendationList, ErrorStateCard, EmptyAssessmentNotice, SampleDataBadge, LoadingStateBox } from '../components/ResultCards';
+import { estimateCost, formatINR, formatINRCompact, formatQuantity } from '../api';
 import toast from 'react-hot-toast';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#f97316', '#06b6d4', '#ec4899'];
+const COLORS = ['#ea580c', '#f97316', '#f59e0b', '#3b82f6', '#10b981', '#06b6d4', '#8b5cf6'];
 
 const CUSTOM_TOOLTIP = ({ active, payload }) => {
   if (active && payload?.length) {
     return (
-      <div className="card" style={{ padding: '10px 14px', minWidth: 160 }}>
+      <div className="card" style={{ padding: '8px 12px', minWidth: 150 }}>
         <p style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>{payload[0].name}</p>
-        <p style={{ color: '#93c5fd', fontSize: '0.875rem' }}>{formatINR(payload[0].value)}</p>
+        <p style={{ color: '#fed7aa', fontSize: '0.875rem', fontWeight: 600 }}>{formatINR(payload[0].value)}</p>
       </div>
     );
   }
@@ -29,6 +29,7 @@ export default function CostEstimation() {
     special_requirements: '',
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -37,17 +38,42 @@ export default function CostEstimation() {
     if (!form.built_up_area_sqft || form.built_up_area_sqft < 1) {
       return toast.error('Please enter a valid built-up area.');
     }
+    setResult(null);
+    setError(null);
     setLoading(true);
     try {
-      const res = await estimateCost({ ...form, built_up_area_sqft: Number(form.built_up_area_sqft), floors: Number(form.floors) });
-      setResult(res.data);
-      toast.success('Cost estimation ready!');
+      const res = await estimateCost({
+        ...form,
+        built_up_area_sqft: Number(form.built_up_area_sqft),
+        floors: Number(form.floors),
+      });
+      const data = res.data;
+      const hasAssessmentData = data && (
+        Array.isArray(data.cost_breakdown) &&
+        data.cost_breakdown.length > 0 &&
+        data.total_estimated_cost_inr > 0
+      );
+
+      setResult(data);
+      if (hasAssessmentData) {
+        toast.success('Cost estimation ready!');
+      } else {
+        toast('Estimation returned no itemized line items', { icon: '⚠️' });
+      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Estimation failed.');
+      const detail = err.response?.data?.detail || err.message || 'Estimation failed.';
+      setError(detail);
+      toast.error(detail);
     } finally {
       setLoading(false);
     }
   };
+
+  const hasAssessmentData = result && (
+    Array.isArray(result.cost_breakdown) &&
+    result.cost_breakdown.length > 0 &&
+    result.total_estimated_cost_inr > 0
+  );
 
   const pieData = result?.cost_breakdown?.map(item => ({
     name: item.label,
@@ -58,49 +84,89 @@ export default function CostEstimation() {
     <div>
       <div className="page-header">
         <div className="flex items-center gap-sm mb-sm">
-          <DollarSign size={24} style={{ color: '#f59e0b' }} />
+          <IndianRupee size={24} style={{ color: 'var(--color-accent-orange)' }} />
           <h1 className="page-title" style={{ marginBottom: 0 }}>Cost Estimation</h1>
         </div>
-        <p className="page-subtitle">AI-generated detailed cost estimation with BOQ breakdown in Indian Rupees (₹).</p>
+        <p className="page-subtitle">AI-generated detailed cost estimation with itemized Bill of Quantities (BOQ) in Indian Rupees (₹ INR).</p>
       </div>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>
         {/* Form */}
         <div className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Project Details</h3>
+          <div className="flex items-center justify-between mb-sm" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Project Details</h3>
+            <SampleDataBadge label="Sample Project Template" />
+          </div>
+
           <div className="form-group">
-            <label className="form-label">Project Type</label>
-            <select className="form-control" value={form.project_type} onChange={e => set('project_type', e.target.value)} id="project-type-select">
+            <label htmlFor="project-type-select" className="form-label">Project Type</label>
+            <select
+              id="project-type-select"
+              className="form-control"
+              value={form.project_type}
+              onChange={e => set('project_type', e.target.value)}
+            >
               {['Residential', 'Commercial', 'Industrial', 'Institutional', 'Mixed-Use', 'Infrastructure'].map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Location</label>
-            <input className="form-control" placeholder="e.g., Mumbai, Maharashtra" value={form.location} onChange={e => set('location', e.target.value)} id="location-input" />
+            <label htmlFor="location-input" className="form-label">Location</label>
+            <input
+              id="location-input"
+              className="form-control"
+              placeholder="e.g., Mumbai, Maharashtra"
+              value={form.location}
+              onChange={e => set('location', e.target.value)}
+            />
           </div>
-          <div className="grid-2">
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
             <div className="form-group">
-              <label className="form-label">Built-up Area (sq.ft)</label>
-              <input className="form-control" type="number" min={100} value={form.built_up_area_sqft} onChange={e => set('built_up_area_sqft', e.target.value)} id="area-input" />
+              <label htmlFor="area-input" className="form-label">Built-up Area (sq.ft)</label>
+              <input
+                id="area-input"
+                className="form-control"
+                type="number"
+                min={100}
+                value={form.built_up_area_sqft}
+                onChange={e => set('built_up_area_sqft', e.target.value)}
+              />
             </div>
             <div className="form-group">
-              <label className="form-label">Number of Floors</label>
-              <input className="form-control" type="number" min={1} max={50} value={form.floors} onChange={e => set('floors', e.target.value)} id="floors-input" />
+              <label htmlFor="floors-input" className="form-label">Number of Floors</label>
+              <input
+                id="floors-input"
+                className="form-control"
+                type="number"
+                min={1}
+                max={50}
+                value={form.floors}
+                onChange={e => set('floors', e.target.value)}
+              />
             </div>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Quality Standard</label>
-            <select className="form-control" value={form.quality_standard} onChange={e => set('quality_standard', e.target.value)} id="quality-select">
+            <label htmlFor="quality-select" className="form-label">Quality Standard</label>
+            <select
+              id="quality-select"
+              className="form-control"
+              value={form.quality_standard}
+              onChange={e => set('quality_standard', e.target.value)}
+            >
               {['Economy', 'Standard', 'Premium', 'Luxury'].map(q => (
                 <option key={q} value={q}>{q}</option>
               ))}
             </select>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Special Requirements (Optional)</label>
+            <label htmlFor="special-requirements-input" className="form-label">Special Requirements (Optional)</label>
             <textarea
+              id="special-requirements-input"
               className="form-control"
               rows={3}
               placeholder="e.g., Earthquake resistant design, rainwater harvesting, solar panels..."
@@ -108,54 +174,101 @@ export default function CostEstimation() {
               onChange={e => set('special_requirements', e.target.value)}
             />
           </div>
-          <button className="btn btn-primary w-full" onClick={handleEstimate} disabled={loading} id="estimate-cost-btn">
-            {loading ? <><div className="spinner spinner-sm" /> Estimating<span className="loading-dots" /></> : <><TrendingUp size={16} /> Generate Estimate</>}
+
+          <button
+            className="btn btn-primary w-full"
+            onClick={handleEstimate}
+            disabled={loading}
+            id="estimate-cost-btn"
+          >
+            {loading ? (
+              <>
+                <div className="spinner spinner-sm" />
+                <span>Estimating in ₹ INR</span>
+                <span className="loading-dots" />
+              </>
+            ) : (
+              <>
+                <TrendingUp size={16} />
+                <span>Generate Estimate</span>
+              </>
+            )}
           </button>
         </div>
 
         {/* Results */}
         <div>
           {loading && (
-            <div className="card loading-overlay">
-              <div className="spinner" />
-              <p className="loading-text">Calculating project costs<span className="loading-dots" /></p>
-              <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: 8 }}>Analyzing market rates for {form.location}</p>
-            </div>
+            <LoadingStateBox
+              title={`Calculating costs for ${form.location}`}
+              subtitle="Analyzing indicative rates and line-item quantities in INR"
+            />
           )}
 
-          {result && !loading && (
+          {error && !loading && (
+            <ErrorStateCard
+              title="Cost Estimation Failed"
+              message={error}
+              onRetry={handleEstimate}
+            />
+          )}
+
+          {result && !loading && !hasAssessmentData && (
+            <EmptyAssessmentNotice
+              title="Estimation Inconclusive — Empty Breakdown"
+              message="Empty data is not presented as a successful assessment. No itemized line items or cost values were produced for the given parameters. Please check your area and parameters, then retry."
+              onRetry={handleEstimate}
+            />
+          )}
+
+          {result && !loading && hasAssessmentData && (
             <div className="result-panel">
               {/* Summary Cards */}
               <div className="stat-grid mb-md" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-                <div className="stat-card blue">
-                  <div className="stat-label">Total Estimated Cost</div>
-                  <div className="stat-value" style={{ fontSize: '1.5rem' }} >{formatINRCompact(result.total_estimated_cost_inr)}</div>
-                  <div className="stat-sub">{formatINR(result.total_estimated_cost_inr)}</div>
-                </div>
                 <div className="stat-card amber">
+                  <div className="stat-label">Total Estimated Cost</div>
+                  <div className="stat-value" style={{ fontSize: '1.45rem' }}>{formatINRCompact(result.total_estimated_cost_inr)}</div>
+                  <div className="stat-sub inr">{formatINR(result.total_estimated_cost_inr)}</div>
+                </div>
+                <div className="stat-card blue">
                   <div className="stat-label">Rate per Sq.ft</div>
-                  <div className="stat-value" style={{ fontSize: '1.5rem' }}>{formatINR(result.cost_per_sqft_inr)}</div>
-                  <div className="stat-sub">per sq.ft</div>
+                  <div className="stat-value" style={{ fontSize: '1.45rem' }}>{formatINR(result.cost_per_sqft_inr)}</div>
+                  <div className="stat-sub">per sq.ft built-up</div>
                 </div>
                 <div className="stat-card green">
                   <div className="stat-label">Timeline</div>
-                  <div className="stat-value" style={{ fontSize: '1.5rem' }}>{result.timeline_months}</div>
+                  <div className="stat-value" style={{ fontSize: '1.45rem' }}>{result.timeline_months}</div>
                   <div className="stat-sub">months estimated</div>
                 </div>
                 <div className="stat-card purple">
                   <div className="stat-label">Confidence</div>
-                  <div className="stat-value" style={{ fontSize: '1.5rem' }}>{result.confidence_score}%</div>
-                  <div className="stat-sub">AI confidence</div>
+                  <div className="stat-value" style={{ fontSize: '1.45rem' }}>{result.confidence_score}%</div>
+                  <div className="stat-sub">Model-reported, uncalibrated</div>
                 </div>
               </div>
 
-              {/* Pie Chart */}
+              {/* Estimate Source & Assumptions */}
+              <div className="card mb-md">
+                <div className="flex items-center gap-xs mb-xs" style={{ flexWrap: 'wrap' }}>
+                  <span className="badge badge-warning">Indicative Estimate</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    {result.estimate_source}
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: 12 }}>
+                  Indicative values only. Verify quantities and rates with a qualified quantity surveyor and local suppliers.
+                  Line and grand totals are calculated from the quantities and unit rates below.
+                </p>
+                <RecommendationList items={result.assumptions} title="Estimate assumptions" />
+              </div>
+
+              {/* Pie Chart & BOQ Table */}
               {pieData.length > 0 && (
                 <div className="card mb-md">
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 16 }}>Cost Breakdown</h4>
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="value">
+                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
                         {pieData.map((_, i) => (
                           <Cell key={i} fill={COLORS[i % COLORS.length]} />
                         ))}
@@ -163,33 +276,42 @@ export default function CostEstimation() {
                       <Tooltip content={<CUSTOM_TOOLTIP />} />
                     </PieChart>
                   </ResponsiveContainer>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Item</th>
-                        <th>Qty</th>
-                        <th>Unit</th>
-                        <th style={{ textAlign: 'right' }}>Amount (₹)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {result.cost_breakdown.map((item, i) => (
-                        <tr key={i}>
-                          <td>
-                            <div className="flex items-center gap-sm">
-                              <div style={{ width: 10, height: 10, borderRadius: 2, background: COLORS[i % COLORS.length], flexShrink: 0 }} />
-                              {item.label}
-                            </div>
-                          </td>
-                          <td>{item.quantity}</td>
-                          <td>{item.unit}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                            {formatINR(item.amount_inr)}
-                          </td>
+
+                  <div className="table-responsive">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Qty</th>
+                          <th>Unit</th>
+                          <th>Rate (₹)</th>
+                          <th style={{ textAlign: 'right' }}>Amount (₹)</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {result.cost_breakdown.map((item, i) => (
+                          <tr key={i}>
+                            <td>
+                              <div className="flex items-center gap-sm">
+                                <div style={{ width: 10, height: 10, borderRadius: 2, background: COLORS[i % COLORS.length], flexShrink: 0 }} />
+                                <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{item.label}</span>
+                              </div>
+                            </td>
+                            <td className="inr">{formatQuantity(item.quantity)}</td>
+                            <td>
+                              <span className="badge badge-info" style={{ textTransform: 'none', fontSize: '0.72rem' }}>
+                                {item.unit}
+                              </span>
+                            </td>
+                            <td className="inr">{formatINR(item.unit_rate_inr)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 600, color: '#fed7aa' }} className="inr">
+                              {formatINR(item.amount_inr)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -208,11 +330,13 @@ export default function CostEstimation() {
             </div>
           )}
 
-          {!result && !loading && (
+          {!result && !loading && !error && (
             <div className="card empty-state">
-              <DollarSign size={52} className="empty-state-icon" />
-              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>No estimate yet</p>
-              <p style={{ fontSize: '0.875rem' }}>Fill in the project details and click "Generate Estimate"</p>
+              <IndianRupee size={52} className="empty-state-icon" />
+              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: 'var(--color-text-primary)' }}>No estimate yet</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+                Fill in the project details and click "Generate Estimate" to produce an INR BOQ
+              </p>
             </div>
           )}
         </div>

@@ -1,12 +1,11 @@
 """
 Centralized Groq MLLM integration layer.
-Handles all AI interactions with structured output and fallback safety.
+Handles AI interactions with strict structured output and explicit provider errors.
 """
 import json
 import base64
 import logging
-from typing import Optional, Type, TypeVar
-from pathlib import Path
+from typing import Type, TypeVar
 
 from groq import Groq
 from pydantic import BaseModel, ValidationError
@@ -19,15 +18,19 @@ GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Multimodal model
 GROQ_TEXT_MODEL = "llama-3.3-70b-versatile"
 
 
+class AIServiceError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
 def _encode_image(image_bytes: bytes) -> str:
     """Encode image bytes to base64 string."""
     return base64.b64encode(image_bytes).decode("utf-8")
 
 
-def _safe_parse(response_text: str, schema: Type[T], fallback: T) -> T:
-    """
-    Parse JSON response safely. On any failure, returns the fallback model.
-    """
+def _safe_parse(response_text: str, schema: Type[T]) -> T:
+    """Parse and validate a complete JSON response from the provider."""
     try:
         # Try to extract JSON from markdown code blocks
         text = response_text.strip()
@@ -38,9 +41,9 @@ def _safe_parse(response_text: str, schema: Type[T], fallback: T) -> T:
         
         data = json.loads(text)
         return schema.model_validate(data)
-    except (json.JSONDecodeError, ValidationError, IndexError, KeyError) as e:
-        logger.warning(f"Response parse failed ({type(e).__name__}): {e}. Using fallback.")
-        return fallback
+    except (json.JSONDecodeError, ValidationError, IndexError, KeyError, TypeError) as error:
+        logger.warning("AI response validation failed (%s)", type(error).__name__)
+        raise AIServiceError("invalid_ai_response") from error
 
 
 def build_json_prompt(schema: Type[T], extra_instruction: str = "") -> str:
@@ -59,7 +62,7 @@ class GroqAIService:
     """Centralized AI service using Groq SDK."""
 
     def __init__(self, api_key: str):
-        self.client = Groq(api_key=api_key)
+        self.client = Groq(api_key=api_key, timeout=45.0, max_retries=0)
 
     def analyze_image_with_text(
         self,
@@ -68,7 +71,6 @@ class GroqAIService:
         system_prompt: str,
         user_prompt: str,
         schema: Type[T],
-        fallback: T,
     ) -> T:
         """Send an image + text query to the multimodal model and parse structured output."""
         try:
@@ -96,17 +98,18 @@ class GroqAIService:
                 max_tokens=4096,
             )
             content = completion.choices[0].message.content or ""
-            return _safe_parse(content, schema, fallback)
-        except Exception as e:
-            logger.error(f"Groq image analysis error: {e}")
-            return fallback
+            return _safe_parse(content, schema)
+        except AIServiceError:
+            raise
+        except Exception as error:
+            logger.error("Groq image analysis failed (%s)", type(error).__name__)
+            raise AIServiceError("ai_provider_error") from error
 
     def query_text(
         self,
         system_prompt: str,
         user_prompt: str,
         schema: Type[T],
-        fallback: T,
     ) -> T:
         """Send a text-only query to the LLM and parse structured output."""
         try:
@@ -122,11 +125,13 @@ class GroqAIService:
                 max_tokens=4096,
             )
             content = completion.choices[0].message.content or ""
-            return _safe_parse(content, schema, fallback)
-        except Exception as e:
-            logger.error(f"Groq text query error: {e}")
-            return fallback
+            return _safe_parse(content, schema)
+        except AIServiceError:
+            raise
+        except Exception as error:
+            logger.error("Groq text query failed (%s)", type(error).__name__)
+            raise AIServiceError("ai_provider_error") from error
 
-    def chat_query(self, system_prompt: str, user_message: str, schema: Type[T], fallback: T) -> T:
+    def chat_query(self, system_prompt: str, user_message: str, schema: Type[T]) -> T:
         """General-purpose chat query with structured output."""
-        return self.query_text(system_prompt, user_message, schema, fallback)
+        return self.query_text(system_prompt, user_message, schema)

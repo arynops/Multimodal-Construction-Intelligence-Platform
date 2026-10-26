@@ -1,27 +1,50 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
-  timeout: 120000, // 2 minutes for AI responses
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  timeout: 60000,
 });
+
+api.interceptors.response.use(
+  response => response,
+  error => {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === 'string') error.message = detail;
+    return Promise.reject(error);
+  },
+);
 
 // Format INR currency
 export const formatINR = (amount) => {
-  if (amount === null || amount === undefined) return '₹0';
+  const num = Number(amount);
+  if (isNaN(num) || amount === null || amount === undefined) return '₹0';
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(num);
 };
 
 export const formatINRCompact = (amount) => {
-  if (!amount) return '₹0';
-  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
-  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-  if (amount >= 1000) return `₹${(amount / 1000).toFixed(0)}K`;
-  return `₹${amount}`;
+  const num = Number(amount);
+  if (isNaN(num) || !num) return '₹0';
+  const abs = Math.abs(num);
+  const sign = num < 0 ? '-' : '';
+  if (abs >= 10000000) return `${sign}₹${(abs / 10000000).toFixed(2).replace(/\.00$/, '')} Cr`;
+  if (abs >= 100000) return `${sign}₹${(abs / 100000).toFixed(2).replace(/\.00$/, '')} L`;
+  if (abs >= 1000) return `${sign}₹${(abs / 1000).toFixed(1).replace(/\.0$/, '')} K`;
+  return formatINR(num);
 };
+
+// Format quantity with standard thousands separator
+export const formatQuantity = (qty) => {
+  const num = Number(qty);
+  if (isNaN(num) || qty === null || qty === undefined) return '0';
+  return new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 2,
+  }).format(num);
+};
+
 
 // Health check
 export const checkHealth = () => api.get('/health');

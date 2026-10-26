@@ -4,28 +4,25 @@ All environment variables are accessed exclusively through this module;
 never import os.getenv() directly in route handlers or services.
 """
 from functools import lru_cache
-from typing import List
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # ─── Groq ──────────────────────────────────────────────────
-    groq_api_key: str = Field(default="", env="GROQ_API_KEY")
+    groq_api_key: str = ""
+    port: int = Field(default=8000, ge=1, le=65535)
+    app_env: str = "development"
+    allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+    max_image_size_mb: int = Field(default=10, ge=1, le=50)
 
-    # ─── Server ────────────────────────────────────────────────
-    port: int = Field(default=8000, env="PORT")
-    app_env: str = Field(default="development", env="APP_ENV")
-
-    # ─── CORS ──────────────────────────────────────────────────
-    allowed_origins: List[str] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
-        env="ALLOWED_ORIGINS",
-    )
-
-    # ─── Upload limits ─────────────────────────────────────────
-    max_image_size_mb: int = Field(default=10, env="MAX_IMAGE_SIZE_MB")
+    @property
+    def cors_origins(self) -> list[str]:
+        origins = [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        if not origins or "*" in origins:
+            raise ValueError("ALLOWED_ORIGINS must contain explicit comma-separated origins.")
+        return origins
 
     @property
     def max_image_size_bytes(self) -> int:
@@ -35,7 +32,11 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": Path(__file__).resolve().parent / ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 @lru_cache(maxsize=1)

@@ -1,10 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, Image, X, CheckCircle } from 'lucide-react';
 
 export default function ImageUploader({ onFileSelect, accept = 'image/*', label = 'Upload Image', maxSize = 10 }) {
   const [preview, setPreview] = useState(null);
   const [fileName, setFileName] = useState('');
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
 
   const onDrop = useCallback((acceptedFiles) => {
     const file = acceptedFiles[0];
@@ -24,8 +28,8 @@ export default function ImageUploader({ onFileSelect, accept = 'image/*', label 
 
   const clearImage = (e) => {
     e.stopPropagation();
-    setPreview(null);
     setFileName('');
+    setPreview(null);
     onFileSelect(null);
   };
 
@@ -47,6 +51,8 @@ export default function ImageUploader({ onFileSelect, accept = 'image/*', label 
               onClick={clearImage}
               className="btn btn-danger"
               style={{ position: 'absolute', top: 12, right: 12, width: 32, height: 32, padding: 0, borderRadius: '50%' }}
+              aria-label="Remove uploaded image"
+              title="Remove image"
             >
               <X size={16} />
             </button>
@@ -62,13 +68,16 @@ export default function ImageUploader({ onFileSelect, accept = 'image/*', label 
         <div
           {...getRootProps()}
           className={`upload-zone ${isDragActive ? 'active' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-label={label}
         >
-          <input {...getInputProps()} id="image-upload-input" />
+          <input {...getInputProps()} id="image-upload-input" aria-label={label} />
           <div className="upload-icon" style={{ display: 'flex', justifyContent: 'center' }}>
             {isDragActive ? (
-              <Image size={48} style={{ color: 'var(--color-accent-primary)', animation: 'float 1s ease infinite' }} />
+              <Image size={48} style={{ color: 'var(--color-accent-orange)', animation: 'float 1s ease infinite' }} />
             ) : (
-              <Upload size={48} />
+              <Upload size={48} style={{ color: 'var(--color-accent-orange)' }} />
             )}
           </div>
           <p className="upload-text-primary">

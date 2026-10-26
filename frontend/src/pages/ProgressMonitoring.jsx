@@ -1,18 +1,11 @@
 import React, { useState } from 'react';
-import { BarChart2, Calendar, TrendingUp, IndianRupee } from 'lucide-react';
+import { BarChart2, Calendar, TrendingUp, IndianRupee, RotateCcw } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import { RecommendationList } from '../components/ResultCards';
+import { RecommendationList, ErrorStateCard, EmptyAssessmentNotice, SampleDataBadge, LoadingStateBox } from '../components/ResultCards';
 import { monitorProgress, formatINR, formatINRCompact } from '../api';
 import toast from 'react-hot-toast';
-
-const statusColors = {
-  completed: '#10b981',
-  in_progress: '#3b82f6',
-  delayed: '#ef4444',
-  pending: '#475569',
-};
 
 export default function ProgressMonitoring() {
   const [form, setForm] = useState({
@@ -26,6 +19,7 @@ export default function ProgressMonitoring() {
     notes: '',
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -38,6 +32,8 @@ export default function ProgressMonitoring() {
   const phases = ['Site Preparation', 'Foundation', 'Structure', 'MEP', 'Finishing', 'External Works'];
 
   const handleMonitor = async () => {
+    setResult(null);
+    setError(null);
     setLoading(true);
     try {
       const res = await monitorProgress({
@@ -45,14 +41,33 @@ export default function ProgressMonitoring() {
         total_budget_inr: Number(form.total_budget_inr),
         spent_so_far_inr: Number(form.spent_so_far_inr),
       });
-      setResult(res.data);
-      toast.success('Progress analysis complete!');
+      const data = res.data;
+      const hasAssessmentData = data && (
+        Array.isArray(data.phases) &&
+        data.phases.length > 0 &&
+        typeof data.overall_progress_percent === 'number'
+      );
+
+      setResult(data);
+      if (hasAssessmentData) {
+        toast.success('Progress analysis complete!');
+      } else {
+        toast('Analysis returned no phase progress records', { icon: '⚠️' });
+      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Analysis failed.');
+      const detail = err.response?.data?.detail || err.message || 'Analysis failed.';
+      setError(detail);
+      toast.error(detail);
     } finally {
       setLoading(false);
     }
   };
+
+  const hasAssessmentData = result && (
+    Array.isArray(result.phases) &&
+    result.phases.length > 0 &&
+    typeof result.overall_progress_percent === 'number'
+  );
 
   const chartData = result?.phases?.map(p => ({
     name: p.phase_name.length > 12 ? p.phase_name.substring(0, 12) + '…' : p.phase_name,
@@ -65,87 +80,172 @@ export default function ProgressMonitoring() {
     <div>
       <div className="page-header">
         <div className="flex items-center gap-sm mb-sm">
-          <BarChart2 size={24} style={{ color: '#8b5cf6' }} />
+          <BarChart2 size={24} style={{ color: 'var(--color-accent-orange)' }} />
           <h1 className="page-title" style={{ marginBottom: 0 }}>Progress Monitoring</h1>
         </div>
-        <p className="page-subtitle">AI-powered schedule variance analysis, EVM tracking, and phase-by-phase progress evaluation.</p>
+        <p className="page-subtitle">AI-powered schedule variance analysis, Earned Value Management (EVM), and phase-by-phase progress evaluation.</p>
       </div>
 
       <div className="grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Project Information</h3>
+          <div className="flex items-center justify-between mb-sm" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Project Information</h3>
+            <SampleDataBadge label="Sample Project Data" />
+          </div>
+
           <div className="form-group">
-            <label className="form-label">Project Name</label>
-            <input className="form-control" value={form.project_name} onChange={e => set('project_name', e.target.value)} id="proj-name-input" />
+            <label htmlFor="proj-name-input" className="form-label">Project Name</label>
+            <input
+              id="proj-name-input"
+              className="form-control"
+              value={form.project_name}
+              onChange={e => set('project_name', e.target.value)}
+            />
           </div>
-          <div className="grid-2">
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
             <div className="form-group">
-              <label className="form-label">Start Date</label>
-              <input className="form-control" type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)} />
+              <label htmlFor="start-date-input" className="form-label">Start Date</label>
+              <input
+                id="start-date-input"
+                className="form-control"
+                type="date"
+                value={form.start_date}
+                onChange={e => set('start_date', e.target.value)}
+              />
             </div>
             <div className="form-group">
-              <label className="form-label">Planned End Date</label>
-              <input className="form-control" type="date" value={form.planned_end_date} onChange={e => set('planned_end_date', e.target.value)} />
+              <label htmlFor="end-date-input" className="form-label">Planned End Date</label>
+              <input
+                id="end-date-input"
+                className="form-control"
+                type="date"
+                value={form.planned_end_date}
+                onChange={e => set('planned_end_date', e.target.value)}
+              />
             </div>
           </div>
-          <div className="grid-2">
+
+          <div className="grid-2" style={{ gap: 'var(--spacing-md)' }}>
             <div className="form-group">
-              <label className="form-label">Total Budget (₹)</label>
-              <input className="form-control" type="number" value={form.total_budget_inr} onChange={e => set('total_budget_inr', e.target.value)} id="budget-input" />
+              <label htmlFor="budget-input" className="form-label">Total Budget (₹ INR)</label>
+              <input
+                id="budget-input"
+                className="form-control"
+                type="number"
+                value={form.total_budget_inr}
+                onChange={e => set('total_budget_inr', e.target.value)}
+              />
             </div>
             <div className="form-group">
-              <label className="form-label">Spent So Far (₹)</label>
-              <input className="form-control" type="number" value={form.spent_so_far_inr} onChange={e => set('spent_so_far_inr', e.target.value)} id="spent-input" />
+              <label htmlFor="spent-input" className="form-label">Spent So Far (₹ INR)</label>
+              <input
+                id="spent-input"
+                className="form-control"
+                type="number"
+                value={form.spent_so_far_inr}
+                onChange={e => set('spent_so_far_inr', e.target.value)}
+              />
             </div>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Current Phase</label>
-            <select className="form-control" value={form.current_phase} onChange={e => set('current_phase', e.target.value)} id="phase-select">
+            <label htmlFor="phase-select" className="form-label">Current Phase</label>
+            <select
+              id="phase-select"
+              className="form-control"
+              value={form.current_phase}
+              onChange={e => set('current_phase', e.target.value)}
+            >
               {phases.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
+
           <div className="form-group">
             <label className="form-label">Completed Phases</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {phases.map(p => (
                 <button
                   key={p}
+                  type="button"
                   onClick={() => togglePhase(p)}
                   className={`badge ${form.completed_phases.includes(p) ? 'badge-success' : 'badge-info'}`}
                   style={{ cursor: 'pointer', padding: '6px 12px', border: 'none' }}
+                  aria-pressed={form.completed_phases.includes(p)}
                 >
                   {form.completed_phases.includes(p) ? '✓ ' : ''}{p}
                 </button>
               ))}
             </div>
           </div>
+
           <div className="form-group">
-            <label className="form-label">Notes / Issues</label>
-            <textarea className="form-control" rows={3} placeholder="Any key issues, delays, or observations..." value={form.notes} onChange={e => set('notes', e.target.value)} />
+            <label htmlFor="progress-notes-input" className="form-label">Notes / Issues</label>
+            <textarea
+              id="progress-notes-input"
+              className="form-control"
+              rows={3}
+              placeholder="Any key issues, delays, or observations..."
+              value={form.notes}
+              onChange={e => set('notes', e.target.value)}
+            />
           </div>
-          <button className="btn btn-primary w-full" onClick={handleMonitor} disabled={loading} id="analyze-progress-btn">
-            {loading ? <><div className="spinner spinner-sm" /> Analyzing<span className="loading-dots" /></> : <><BarChart2 size={16} /> Analyze Progress</>}
+
+          <button
+            className="btn btn-primary w-full"
+            onClick={handleMonitor}
+            disabled={loading}
+            id="analyze-progress-btn"
+          >
+            {loading ? (
+              <>
+                <div className="spinner spinner-sm" />
+                <span>Analyzing EVM</span>
+                <span className="loading-dots" />
+              </>
+            ) : (
+              <>
+                <BarChart2 size={16} />
+                <span>Analyze Progress</span>
+              </>
+            )}
           </button>
         </div>
 
         <div>
           {loading && (
-            <div className="card loading-overlay">
-              <div className="spinner" />
-              <p className="loading-text">AI analyzing project progress<span className="loading-dots" /></p>
-            </div>
+            <LoadingStateBox
+              title="AI analyzing project progress"
+              subtitle="Calculating schedule variance and Earned Value Management"
+            />
           )}
 
-          {result && !loading && (
+          {error && !loading && (
+            <ErrorStateCard
+              title="Progress Analysis Failed"
+              message={error}
+              onRetry={handleMonitor}
+            />
+          )}
+
+          {result && !loading && !hasAssessmentData && (
+            <EmptyAssessmentNotice
+              title="Progress Analysis Inconclusive — Empty Data"
+              message="Empty data is not presented as a successful assessment. No phase timeline or variance measurements were produced. Please review project milestones and dates, then retry."
+              onRetry={handleMonitor}
+            />
+          )}
+
+          {result && !loading && hasAssessmentData && (
             <div className="result-panel">
               {/* KPI Cards */}
               <div className="stat-grid mb-md" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-                <div className="stat-card blue">
+                <div className="stat-card amber">
                   <div className="stat-label">Overall Progress</div>
                   <div className="stat-value">{result.overall_progress_percent?.toFixed(0)}%</div>
                   <div style={{ marginTop: 6 }}>
                     <div className="progress-bar-container">
-                      <div className="progress-bar-fill" style={{ width: `${result.overall_progress_percent}%` }} />
+                      <div className="progress-bar-fill" style={{ width: `${Math.min(100, Math.max(0, result.overall_progress_percent))}%` }} />
                     </div>
                   </div>
                 </div>
@@ -154,7 +254,7 @@ export default function ProgressMonitoring() {
                   <div className="stat-value">{result.schedule_variance_days > 0 ? '+' : ''}{result.schedule_variance_days}</div>
                   <div className="stat-sub">days {result.schedule_variance_days > 0 ? 'delayed' : 'ahead'}</div>
                 </div>
-                <div className="stat-card amber">
+                <div className="stat-card blue">
                   <div className="stat-label">Budget Utilized</div>
                   <div className="stat-value" style={{ fontSize: '1.25rem' }}>{formatINRCompact(result.budget_utilized_inr)}</div>
                   <div className="stat-sub">Remaining: {formatINRCompact(result.budget_remaining_inr)}</div>
@@ -175,10 +275,10 @@ export default function ProgressMonitoring() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} />
                       <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} unit="%" />
-                      <Tooltip contentStyle={{ background: '#0f1e3c', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 8, color: '#f0f6ff' }} />
+                      <Tooltip contentStyle={{ background: '#0a1628', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 8, color: '#f0f6ff' }} />
                       <Legend />
-                      <Bar dataKey="Planned" fill="rgba(59,130,246,0.4)" radius={[4,4,0,0]} />
-                      <Bar dataKey="Actual" fill="#3b82f6" radius={[4,4,0,0]} />
+                      <Bar dataKey="Planned" fill="rgba(249,115,22,0.35)" radius={[4,4,0,0]} />
+                      <Bar dataKey="Actual" fill="#f97316" radius={[4,4,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -186,52 +286,56 @@ export default function ProgressMonitoring() {
 
               {/* Phase Table */}
               <div className="card mb-md">
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12 }}>Phase Status</h4>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Phase</th>
-                      <th>Status</th>
-                      <th>Planned</th>
-                      <th>Actual</th>
-                      <th>Delay</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.phases?.map((p, i) => (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{p.phase_name}</td>
-                        <td>
-                          <span className={`badge badge-${p.status === 'completed' ? 'success' : p.status === 'in_progress' ? 'info' : p.status === 'delayed' ? 'high' : 'medium'}`}>
-                            {p.status}
-                          </span>
-                        </td>
-                        <td>{p.planned_percent}%</td>
-                        <td style={{ color: p.actual_percent >= p.planned_percent ? '#10b981' : '#f59e0b' }}>
-                          {p.actual_percent}%
-                        </td>
-                        <td style={{ color: p.delay_days > 0 ? '#ef4444' : '#10b981' }}>
-                          {p.delay_days > 0 ? `+${p.delay_days}d` : '—'}
-                        </td>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 12 }}>Phase Status Breakdown</h4>
+                <div className="table-responsive">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Phase</th>
+                        <th>Status</th>
+                        <th>Planned</th>
+                        <th>Actual</th>
+                        <th>Delay</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {result.phases?.map((p, i) => (
+                        <tr key={i}>
+                          <td style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{p.phase_name}</td>
+                          <td>
+                            <span className={`badge badge-${p.status === 'completed' ? 'success' : p.status === 'in_progress' ? 'info' : p.status === 'delayed' ? 'critical' : 'medium'}`}>
+                              {p.status}
+                            </span>
+                          </td>
+                          <td className="inr">{p.planned_percent}%</td>
+                          <td style={{ color: p.actual_percent >= p.planned_percent ? '#10b981' : '#f59e0b', fontWeight: 600 }} className="inr">
+                            {p.actual_percent}%
+                          </td>
+                          <td style={{ color: p.delay_days > 0 ? '#ef4444' : '#10b981' }} className="inr">
+                            {p.delay_days > 0 ? `+${p.delay_days}d` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {result.recommendations?.length > 0 && (
                 <div className="card">
-                  <RecommendationList items={result.recommendations} title="AI Recommendations" />
+                  <RecommendationList items={result.recommendations} title="AI Progress Recommendations" />
                 </div>
               )}
             </div>
           )}
 
-          {!result && !loading && (
+          {!result && !loading && !error && (
             <div className="card empty-state">
               <BarChart2 size={52} className="empty-state-icon" />
-              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>No analysis yet</p>
-              <p style={{ fontSize: '0.875rem' }}>Fill in project data and analyze progress</p>
+              <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: 'var(--color-text-primary)' }}>No analysis yet</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+                Fill in project milestone data and analyze progress
+              </p>
             </div>
           )}
         </div>

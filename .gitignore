@@ -4,8 +4,9 @@
 
 # ─── Environment files (NEVER commit real secrets) ─────────────
 .env
-backend/.env
-frontend/.env
+.env.*
+!.env.example
+*.env
 
 # ─── Python ────────────────────────────────────────────────────
 __pycache__/
@@ -39,6 +40,9 @@ coverage.xml
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
 
 # Package manager locks (keep package-lock.json, ignore others)
 yarn.lock

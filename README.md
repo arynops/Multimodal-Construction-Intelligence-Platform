@@ -67,6 +67,9 @@ The backend loads settings directly from `backend/.env` using Pydantic Settings.
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `GROQ_API_KEY` | Yes (for AI) | `""` | Groq API key (starts with `gsk_`). Get a key at [console.groq.com](https://console.groq.com). |
+| `GROQ_TEXT_MODEL` | No | `openai/gpt-oss-120b` | Supported Groq model for text queries and estimations. |
+| `GROQ_VISION_MODEL` | No | `qwen/qwen3.8-27b` | Supported Groq multimodal vision model for image inspections. |
+| `GROQ_BASE_URL` | No | None (`https://api.groq.com`) | Optional custom Groq API base URL. |
 | `PORT` | No | `8000` | Port for the backend server. |
 | `APP_ENV` | No | `development` | Environment label (`development` or `production`). |
 | `ALLOWED_ORIGINS` | No | `http://localhost:5173,http://localhost:3000` | Comma-separated list of exact browser origins permitted by CORS. Wildcards (`*`) are rejected. |
@@ -184,8 +187,10 @@ The backend integrates Groq models through the official Python SDK:
 
 | Workload | Model Identifier | Input Type | Used In |
 | --- | --- | --- | --- |
-| **Multimodal Vision** | `meta-llama/llama-4-scout-17b-16e-instruct` | Base64 Image + Structured Prompt | Site Analysis, Safety Inspection, Visual Progress |
-| **Text Generation** | `llama-3.3-70b-versatile` | Text / Structured Prompt | Cost Estimation, Material Analysis, Progress Monitoring, Project Reports, AI Chat |
+| **Multimodal Vision** | `qwen/qwen3.8-27b` | Base64 Image + Structured Prompt | Site Analysis, Safety Inspection, Visual Progress |
+| **Text Generation** | `openai/gpt-oss-120b` | Text / Structured Prompt | Cost Estimation, Material Analysis, Progress Monitoring, Project Reports, AI Chat |
+
+Model IDs are configurable via `GROQ_VISION_MODEL` and `GROQ_TEXT_MODEL` in `backend/.env`.
 
 All responses are validated against strict Pydantic v2 schemas. If the AI provider returns an invalid payload or is unreachable, the API returns a structured HTTP 502 error rather than unverified placeholder data.
 

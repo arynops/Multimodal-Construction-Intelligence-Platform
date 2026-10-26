@@ -41,8 +41,17 @@ ai_service: Optional[GroqAIService] = None
 async def lifespan(app: FastAPI):
     global ai_service
     if settings.groq_api_key:
-        ai_service = GroqAIService(api_key=settings.groq_api_key)
-        logger.info("Groq AI service initialized.")
+        ai_service = GroqAIService(
+            api_key=settings.groq_api_key,
+            vision_model=settings.groq_vision_model,
+            text_model=settings.groq_text_model,
+            base_url=settings.groq_base_url,
+        )
+        logger.info(
+            "Groq AI service initialized (text: %s, vision: %s).",
+            settings.groq_text_model,
+            settings.groq_vision_model,
+        )
     else:
         ai_service = None
         logger.warning("GROQ_API_KEY is not configured; AI endpoints are unavailable.")

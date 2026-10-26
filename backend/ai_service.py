@@ -5,7 +5,7 @@ Handles AI interactions with strict structured output and explicit provider erro
 import json
 import base64
 import logging
-from typing import Type, TypeVar
+from typing import Optional, Type, TypeVar
 
 from groq import Groq
 from pydantic import BaseModel, ValidationError
@@ -14,8 +14,10 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Multimodal model
-GROQ_TEXT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.8-27b"
+DEFAULT_GROQ_TEXT_MODEL = "openai/gpt-oss-120b"
+GROQ_MODEL = DEFAULT_GROQ_VISION_MODEL  # Maintained for backward compatibility
+GROQ_TEXT_MODEL = DEFAULT_GROQ_TEXT_MODEL  # Maintained for backward compatibility
 
 
 class AIServiceError(Exception):
@@ -38,7 +40,7 @@ def _safe_parse(response_text: str, schema: Type[T]) -> T:
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
-        
+
         data = json.loads(text)
         return schema.model_validate(data)
     except (json.JSONDecodeError, ValidationError, IndexError, KeyError, TypeError) as error:
@@ -61,8 +63,32 @@ Respond with a single valid JSON object only. Do not include any text before or 
 class GroqAIService:
     """Centralized AI service using Groq SDK."""
 
-    def __init__(self, api_key: str):
-        self.client = Groq(api_key=api_key, timeout=45.0, max_retries=0)
+    def __init__(
+        self,
+        api_key: str,
+        vision_model: str = DEFAULT_GROQ_VISION_MODEL,
+        text_model: str = DEFAULT_GROQ_TEXT_MODEL,
+        base_url: Optional[str] = None,
+    ):
+        self.vision_model = vision_model
+        self.text_model = text_model
+        client_kwargs = {
+            "api_key": api_key,
+            "timeout": 45.0,
+            "max_retries": 0,
+        }
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self.client = Groq(**client_kwargs)
+
+    def _log_provider_error(self, operation: str, error: Exception) -> None:
+        """Log provider HTTP status and error details without leaking API keys or request data."""
+        status_code = getattr(error, "status_code", None)
+        message = getattr(error, "message", None) or str(error)
+        if status_code is not None:
+            logger.error("Groq %s failed (HTTP %s): %s", operation, status_code, message)
+        else:
+            logger.error("Groq %s failed (%s): %s", operation, type(error).__name__, message)
 
     def analyze_image_with_text(
         self,
@@ -78,7 +104,7 @@ class GroqAIService:
             json_instruction = build_json_prompt(schema)
 
             completion = self.client.chat.completions.create(
-                model=GROQ_MODEL,
+                model=self.vision_model,
                 messages=[
                     {"role": "system", "content": system_prompt + "\n\n" + json_instruction},
                     {
@@ -102,7 +128,7 @@ class GroqAIService:
         except AIServiceError:
             raise
         except Exception as error:
-            logger.error("Groq image analysis failed (%s)", type(error).__name__)
+            self._log_provider_error("image analysis", error)
             raise AIServiceError("ai_provider_error") from error
 
     def query_text(
@@ -116,7 +142,7 @@ class GroqAIService:
             json_instruction = build_json_prompt(schema)
 
             completion = self.client.chat.completions.create(
-                model=GROQ_TEXT_MODEL,
+                model=self.text_model,
                 messages=[
                     {"role": "system", "content": system_prompt + "\n\n" + json_instruction},
                     {"role": "user", "content": user_prompt},
@@ -129,7 +155,7 @@ class GroqAIService:
         except AIServiceError:
             raise
         except Exception as error:
-            logger.error("Groq text query failed (%s)", type(error).__name__)
+            self._log_provider_error("text query", error)
             raise AIServiceError("ai_provider_error") from error
 
     def chat_query(self, system_prompt: str, user_message: str, schema: Type[T]) -> T:
